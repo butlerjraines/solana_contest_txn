@@ -1,14 +1,14 @@
 require('@dotenvx/dotenvx').config()
 const express = require('express');
-const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const path = require('path');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getMint, getTokenMetadata } = require('@solana/spl-token');
 const { Metaplex } = require('@metaplex-foundation/js');
 
 const app = express();
 const port = 3000;
 
-app.set('view engine', 'ejs');
-app.use(express.static('public'));
+app.use(express.static('dist'));
 app.use(express.json());
 
 const RPC_ENDPOINT = 'https://holy-greatest-flower.solana-mainnet.quiknode.pro/9d4120cc03bcef51ba442c7b91195c9393917a30/';
@@ -29,46 +29,27 @@ function isValidSolanaAddress(address) {
   }
 }
 
-app.get('/', (req, res) => {
-  res.render('index', { 
+app.get('/config', (req, res) => {
+  res.json({ 
     defaultMinBalance: DEFAULT_MIN_BALANCE,
     transactionConfirmation: TRANSACTION_CONFIRMATION,
-    transactionAmount: TRANSACTION_AMOUNT,
-    transactionRecipient: TRANSACTION_RECIPIENT
+    network: RPC_ENDPOINT,
+    receiverPublicKey: TRANSACTION_RECIPIENT,
+    solAmount: TRANSACTION_AMOUNT
   });
 });
 
 app.post('/getHolder', async (req, res) => {
-  const { mintAddress, minTokens, walletKey } = req.body;
+  const mintAddress = req.body.mintAddress;
+  const minTokens = parseInt(req.body.minTokens) || DEFAULT_MIN_BALANCE;
 
   if (!isValidSolanaAddress(mintAddress)) {
     return res.status(400).json({ error: 'Invalid Solana address format' });
   }
 
   try {
-    let transactionSignature = null;
-    if (TRANSACTION_CONFIRMATION && walletKey) {
-      const transaction = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: new PublicKey(walletKey),
-          toPubkey: new PublicKey(TRANSACTION_RECIPIENT),
-          lamports: LAMPORTS_PER_SOL * TRANSACTION_AMOUNT
-        })
-      );
-
-      const { blockhash } = await connection.getRecentBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = new PublicKey(walletKey);
-
-      const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
-      const transactionBase64 = serializedTransaction.toString('base64');
-
-      // Send the serialized transaction back to the client for signing
-      return res.json({ transactionBase64 });
-    }
-
     const result = await getRandomTokenHolder(mintAddress, minTokens);
-    res.json({ ...result, transactionSignature });
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -147,14 +128,19 @@ async function getRandomTokenHolder(mintAddress, minTokens) {
   const rawTokenBalance = randomAccountInfo.account.data.readBigUInt64LE(64);
   const adjustedBalance = Number(rawTokenBalance) / (10 ** decimals);
 
-  return { ownerAddress,
-     adjustedBalance,
-      programType,
-       tokenName,
-        tokenSymbol,
-        eligibleHolders: validAccounts.length 
-    };
+  return { 
+    ownerAddress, 
+    adjustedBalance, 
+    programType, 
+    tokenName, 
+    tokenSymbol,
+    eligibleHolders: validAccounts.length
+  };
 }
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
